@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.io.wavfile
 import torch
+import torch_directml
 from scipy import signal
 
 from main import Net, num_tags, prediction_to_str
@@ -33,11 +34,22 @@ if __name__ == "__main__":
     spectrogram_size = spec.shape[0]
 
     # Load model
-    device = torch.device("cpu")
+    if(torch_directml.is_available() == True):
+        print("Have DirectML devices count=", torch_directml.device_count())
+        device = torch_directml.device()
+        print("Using device", torch_directml.device_name(device.index))
+        print("gpu memory",torch_directml.gpu_memory(device.index))
+    else:
+        device = torch.device("cpu")
+    #deviceCpu = torch.device("cpu")
+
     model = Net(num_tags, spectrogram_size)
     model.load_state_dict(torch.load(args.model, map_location=device))
-    model.eval()
+    #deviceDML = torch_directml.device()
+    #model.to(deviceDML)
+    #torch.save(model.state_dict(), args.model.replace(".pt", "Dml.pt"))
 
+    model.eval()
     # Run model on audio
     spec = torch.from_numpy(spec)
     spec = spec.permute(1, 0)

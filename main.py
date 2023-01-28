@@ -7,11 +7,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils import data
-
+import os
+import numpy as np
 
 from morse import ALPHABET, generate_sample
 from itertools import groupby
+import logging
+import time
+from time import strftime
 
+QRMS=[]
 num_tags = len(ALPHABET)
 
 # 0: blank label
@@ -52,25 +57,27 @@ class Net(nn.Module):
         super(Net, self).__init__()
 
         num_tags = num_tags + 1  # 0: blank
-        hidden_dim = 256
-        lstm_dim1 = 256
+        hidden_dim = 512
+        lstm_dim1 = 512
 
         self.dense1 = nn.Linear(spectrogram_size, hidden_dim)
         self.dense2 = nn.Linear(hidden_dim, hidden_dim)
         self.dense3 = nn.Linear(hidden_dim, hidden_dim)
-        self.dense4 = nn.Linear(hidden_dim, lstm_dim1)
+        self.dense4 = nn.Linear(hidden_dim, hidden_dim)
+        self.dense5 = nn.Linear(hidden_dim, lstm_dim1)
         self.lstm1 = nn.LSTM(lstm_dim1, lstm_dim1, batch_first=True)
-        self.dense5 = nn.Linear(lstm_dim1, num_tags)
+        self.dense6 = nn.Linear(lstm_dim1, num_tags)
 
     def forward(self, x):
         x = F.relu(self.dense1(x))
         x = F.relu(self.dense2(x))
         x = F.relu(self.dense3(x))
         x = F.relu(self.dense4(x))
+        x = F.relu(self.dense5(x))
 
         x, _ = self.lstm1(x)
 
-        x = self.dense5(x)
+        x = self.dense6(x)
         x = F.log_softmax(x, dim=2)
         return x
 
@@ -83,12 +90,15 @@ class Dataset(data.Dataset):
         return 2048
 
     def __getitem__(self, index):
-        length = random.randrange(10, 20)
+        length = random.randrange(10, 30)
         pitch = random.randrange(100, 950)
         wpm = random.randrange(10, 40)
         noise_power = random.randrange(0, 200)
         amplitude = random.randrange(10, 150)
-        return get_training_sample(length, pitch, wpm, noise_power, amplitude)
+        qrmIndex = random.randrange(0, len(os.listdir("QRM")))
+        fadePeriod = random.randrange(0, 10)
+        fadePhase = 2*np.pi*random.randrange(0, 100)/100.0
+        return get_training_sample(length, pitch, wpm, noise_power,qrmIndex, fadePeriod,fadePhase, amplitude)
 
 
 def collate_fn_pad(batch):
@@ -104,6 +114,8 @@ def collate_fn_pad(batch):
 
 
 if __name__ == "__main__":
+    logfilename = 'logs/log{}.txt'.format(strftime('%Y%m%d%H%M%S'))
+    logging.basicConfig(filename=logfilename, level=logging.DEBUG, format="%(asctime)s %(message)s")
     batch_size = 64
     spectrogram_size = generate_sample()[1].shape[0]
 
@@ -113,6 +125,7 @@ if __name__ == "__main__":
     # Set up trainer & evaluator
     model = Net(num_tags, spectrogram_size).to(device)
     print("Number of params", model.count_parameters())
+    logging.info(f"Number of params:{model.count_parameters()}")
 
     # Lower learning rate to 1e-4 after about 1500 epochs
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
@@ -135,6 +148,7 @@ if __name__ == "__main__":
 
     model.train()
     while True:
+        stime = time.perf_counter()
         for (input_lengths, output_lengths, x, y) in train_loader:
             x, y = x.to(device), y.to(device)
 
@@ -154,9 +168,20 @@ if __name__ == "__main__":
 
         if epoch % 10 == 0:
             torch.save(model.state_dict(), f"models/{epoch:06}.pt")
+        
+        ftime = time.perf_counter()
+        took = ftime-stime
+   
+        logging.info(f"Epoch:{epoch} Elapsed:{took:0.4f} seconds")
+        logging.info(prediction_to_str(y[0]))
+        logging.info(prediction_to_str(m))
+        logging.info(loss.item())
+        logging.info("-------------")
 
+        print(f"Epoch:{epoch} Elapsed:{took:0.4f} seconds")
         print(prediction_to_str(y[0]))
         print(prediction_to_str(m))
         print(loss.item())
-        print()
+        print("-------------")
         epoch += 1
+
