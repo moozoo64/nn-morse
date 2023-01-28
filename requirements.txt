@@ -8,3 +8,4 @@ matplotlib
 tensorboard
 torch-tb-profiler
 sounddevice
+ffmpeg
